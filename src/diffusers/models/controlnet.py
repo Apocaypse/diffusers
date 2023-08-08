@@ -28,8 +28,8 @@ from .unet_2d_blocks import (
     CrossAttnDownBlock2D,
     DownBlock2D,
     UNetMidBlock2DCrossAttn,
+    UNetMidBlock2DSimpleCrossAttn,
     get_down_block,
-    UNetMidBlock2DSimpleCrossAttn
 )
 from .unet_2d_condition import UNet2DConditionModel
 
@@ -177,17 +177,11 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         conditioning_channels: int = 3,
         flip_sin_to_cos: bool = True,
         freq_shift: int = 0,
-        # down_block_types: Tuple[str] = (
-        #     "CrossAttnDownBlock2D",
-        #     "CrossAttnDownBlock2D",
-        #     "CrossAttnDownBlock2D",
-        #     "DownBlock2D",
-        # ),
         down_block_types: Tuple[str] = (
-            "ResnetDownsampleBlock2D",
-            "SimpleCrossAttnDownBlock2D",
-            "SimpleCrossAttnDownBlock2D",
-            "SimpleCrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
+            "DownBlock2D",
         ),
         only_cross_attention: Union[bool, Tuple[bool]] = False,
         block_out_channels: Tuple[int] = (320, 640, 1280, 1280),
@@ -215,6 +209,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         conditioning_embedding_out_channels: Optional[Tuple[int]] = (16, 32, 96, 256),
         global_pool_conditions: bool = False,
         addition_embed_type_num_heads=64,
+        cross_attention_norm: Optional[str] = "group_norm",
+        mid_block_only_cross_attention: bool = False,
     ):
         super().__init__()
 
@@ -387,7 +383,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
                 only_cross_attention=only_cross_attention[i],
                 upcast_attention=upcast_attention,
                 resnet_time_scale_shift=resnet_time_scale_shift,
-                cross_attention_norm="group_norm",
+                cross_attention_norm=cross_attention_norm,
             )
             self.down_blocks.append(down_block)
 
@@ -408,19 +404,20 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
 
-        # self.mid_block = UNetMidBlock2DCrossAttn(
-        #     transformer_layers_per_block=transformer_layers_per_block[-1],
+        # self.mid_block = UNetMidBlock2DSimpleCrossAttn(
+        #     # transformer_layers_per_block=transformer_layers_per_block[-1],
         #     in_channels=mid_block_channel,
         #     temb_channels=time_embed_dim,
         #     resnet_eps=norm_eps,
         #     resnet_act_fn=act_fn,
         #     output_scale_factor=mid_block_scale_factor,
-        #     resnet_time_scale_shift=resnet_time_scale_shift,
-        #     cross_attention_dim=cross_attention_dim,
-        #     num_attention_heads=num_attention_heads[-1],
+        #     # resnet_time_scale_shift=resnet_time_scale_shift,
+        #     # num_attention_heads=num_attention_heads[-1],
         #     resnet_groups=norm_num_groups,
-        #     use_linear_projection=use_linear_projection,
-        #     upcast_attention=upcast_attention,
+        #     resnet_time_scale_shift=resnet_time_scale_shift,
+        #     only_cross_attention=mid_block_only_cross_attention,
+        #     # use_linear_projection=use_linear_projection,
+        #     # upcast_attention=upcast_attention,
         # )
         self.mid_block = UNetMidBlock2DSimpleCrossAttn(
             in_channels=mid_block_channel,
@@ -438,8 +435,6 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             only_cross_attention=False,
             cross_attention_norm="group_norm",
         )
-
-        
 
     @classmethod
     def from_unet(
@@ -505,7 +500,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
             if controlnet.class_embedding:
                 controlnet.class_embedding.load_state_dict(unet.class_embedding.state_dict())
-
+            
+            # unet.down_blocks.state_dict()
             controlnet.down_blocks.load_state_dict(unet.down_blocks.state_dict())
             controlnet.mid_block.load_state_dict(unet.mid_block.state_dict())
 
@@ -779,9 +775,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
         sample = sample + controlnet_cond
 
-        encoder_hidden_states = self.encoder_hid_proj(encoder_hidden_states)
-        
         # 3. down
+        encoder_hidden_states = self.encoder_hid_proj(encoder_hidden_states)
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:

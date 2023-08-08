@@ -744,7 +744,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                     torch.cat([intermediate_images] * 2) if do_classifier_free_guidance else intermediate_images
                 )
                 model_input = self.scheduler.scale_model_input(model_input, t)
-
+                
                 # predict the noise residual
                 noise_pred = self.unet(
                     model_input,

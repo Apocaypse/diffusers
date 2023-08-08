@@ -16,7 +16,7 @@
 import argparse
 import logging
 import math
-import os
+import os, sys
 import random
 import shutil
 from pathlib import Path
@@ -37,6 +37,9 @@ from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
+from torchvision.transforms import Resize
+
+sys.path.append("/home/glyph/chenxy/diffusers")
 
 import diffusers
 from diffusers import (
@@ -50,7 +53,9 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
+import time
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "1" 
 
 if is_wandb_available():
     import wandb
@@ -179,21 +184,18 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
     )
     model_class = text_encoder_config.architectures[0]
 
-    if model_class == "CLIPTextModel":
-        # from transformers import CLIPTextModel
+    # if model_class == "CLIPTextModel":
+    #     from transformers import CLIPTextModel
 
-        # return CLIPTextModel
+    #     return CLIPTextModel
+    # elif model_class == "RobertaSeriesModelWithTransformation":
+    #     from diffusers.pipelines.alt_diffusion.modeling_roberta_series import RobertaSeriesModelWithTransformation
+
+    #     return RobertaSeriesModelWithTransformation
+    if model_class == "T5EncoderModel":
         from transformers import T5EncoderModel
-
+        
         return T5EncoderModel
-    elif model_class == "T5EncoderModel":
-        from transformers import T5EncoderModel
-
-        return T5EncoderModel
-    elif model_class == "RobertaSeriesModelWithTransformation":
-        from diffusers.pipelines.alt_diffusion.modeling_roberta_series import RobertaSeriesModelWithTransformation
-
-        return RobertaSeriesModelWithTransformation
     else:
         raise ValueError(f"{model_class} is not supported.")
 
@@ -283,7 +285,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=64,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -715,7 +717,9 @@ def collate_fn(examples):
         "conditioning_pixel_values": conditioning_pixel_values,
         "input_ids": input_ids,
     }
-
+    
+# def vb_loss():
+    
 
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
@@ -997,13 +1001,15 @@ def main(args):
 
     image_logs = None
     for epoch in range(first_epoch, args.num_train_epochs):
+        
         for step, batch in enumerate(train_dataloader):
+            t1 = time.time()
             with accelerator.accumulate(controlnet):
                 # Convert images to latent space
                 # latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
                 # latents = latents * vae.config.scaling_factor
-
-                latents = F.interpolate(batch["pixel_values"].to(dtype=weight_dtype), size=(64, 64))
+                torch_resize = Resize([64,64])
+                latents = torch_resize(batch["pixel_values"]).to(dtype=weight_dtype)
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
@@ -1028,7 +1034,7 @@ def main(args):
                     controlnet_cond=controlnet_image,
                     return_dict=False,
                 )
-
+                
                 # Predict the noise residual
                 model_pred = unet(
                     noisy_latents,
@@ -1047,6 +1053,8 @@ def main(args):
                     target = noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                
+                model_pred, _ = torch.chunk(model_pred, 2, dim=1)
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 accelerator.backward(loss)
@@ -1090,7 +1098,7 @@ def main(args):
 
                     if args.validation_prompt is not None and global_step % args.validation_steps == 0:
                         image_logs = log_validation(
-                            vae,
+                            # vae,
                             text_encoder,
                             tokenizer,
                             unet,
@@ -1107,6 +1115,9 @@ def main(args):
 
             if global_step >= args.max_train_steps:
                 break
+            
+            t2=time.time()
+            print(t2-t1)
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
