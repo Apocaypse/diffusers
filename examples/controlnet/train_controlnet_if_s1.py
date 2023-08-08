@@ -12,12 +12,11 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-#
 
 import argparse
 import logging
 import math
-import os, sys
+import os
 import random
 import shutil
 from pathlib import Path
@@ -40,8 +39,6 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 from torchvision.transforms import Resize
 
-sys.path.append("/home/glyph/chenxy/diffusers")
-
 import diffusers
 from diffusers import (
     AutoencoderKL,
@@ -56,7 +53,6 @@ from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 import time
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" 
 
 if is_wandb_available():
     import wandb
@@ -1004,7 +1000,7 @@ def main(args):
     for epoch in range(first_epoch, args.num_train_epochs):
         
         for step, batch in enumerate(train_dataloader):
-            t1 = time.time()
+            # t1 = time.time()
             with accelerator.accumulate(controlnet):
                 # Convert images to latent space
                 # latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
@@ -1117,8 +1113,8 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
             
-            t2=time.time()
-            print(t2-t1)
+            # t2 = time.time()
+            # print(t2-t1)
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
