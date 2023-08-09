@@ -38,6 +38,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 from torchvision.transforms import Resize
+from loss import training_loss
 
 import diffusers
 from diffusers import (
@@ -1051,8 +1052,11 @@ def main(args):
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
                 
-                model_pred, _ = torch.chunk(model_pred, 2, dim=1)
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                loss_func = training_loss(noise_scheduler.betas.numpy())
+                loss = loss_func.losses(model_pred, latents, timesteps, noise=noise)["loss"].mean()
+                
+                # model_pred, _ = torch.chunk(model_pred, 2, dim=1)
+                # loss1 = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
